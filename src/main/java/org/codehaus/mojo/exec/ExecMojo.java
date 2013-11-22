@@ -25,7 +25,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintWriter;
+import java.lang.reflect.Method;
 import java.net.URL;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -46,6 +48,7 @@ import org.apache.commons.exec.ExecuteException;
 import org.apache.commons.exec.Executor;
 import org.apache.commons.exec.OS;
 import org.apache.commons.exec.PumpStreamHandler;
+import org.apache.commons.io.output.WriterOutputStream;
 import org.apache.maven.artifact.Artifact;
 import org.apache.maven.artifact.resolver.filter.AndArtifactFilter;
 import org.apache.maven.artifact.resolver.filter.IncludesArtifactFilter;
@@ -205,6 +208,14 @@ public class ExecMojo
     @Parameter( property = "exec.longClasspath", defaultValue = "false" )
     private boolean longClasspath;
 
+    /**
+     * Character encoding of the executable's output.
+     *
+     * @parameter
+     * @since 1.4
+     */
+    private String executableOutputCharset;
+
     public static final String CLASSPATH_TOKEN = "%classpath";
 
     /**
@@ -289,7 +300,7 @@ public class ExecMojo
                 }
                 else
                 {
-                    resultCode = executeCommandLine( exec, commandLine, enviro, System.out, System.err );
+                    resultCode = executeCommandLine( exec, commandLine, enviro, getConsoleOrSystemOut(), System.err );
                 }
 
                 if ( isResultCodeAFailure( resultCode ) )
@@ -986,5 +997,37 @@ public class ExecMojo
 
         return tmpFile;
 
+    }
+
+    private OutputStream getConsoleOrSystemOut()
+    {
+        String charsetName;
+        if (executableOutputCharset == null)
+        {
+            charsetName = Charset.defaultCharset().name();
+        }
+        else
+        {
+            charsetName = executableOutputCharset;
+        }
+
+        try
+        {
+            // java.io.Console is only available in JDK6
+            Method consoleMethod = System.class.getDeclaredMethod("console");
+            Object console = consoleMethod.invoke(null);
+            if (console == null)
+            {
+                // output is being redirected to somewhere other than a console
+                return System.out;
+            }
+            Class<?> consoleClass = Class.forName("java.io.Console");
+            Method writerMethod = consoleClass.getDeclaredMethod("writer");
+            PrintWriter writer = (PrintWriter) writerMethod.invoke(console);
+            return new WriterOutputStream(writer, charsetName, 1024, true);
+        } catch (Exception e)
+        {
+            return System.out;
+        }
     }
 }
